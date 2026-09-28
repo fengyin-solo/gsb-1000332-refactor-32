@@ -30,6 +30,23 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+# 注意：固定路径必须注册在 /{entry_id} 之前，否则会被当成编号解析。
+@router.get("/maintenance")
+def list_maintenance(
+    entry_id: int | None = Query(default=None, description="只看某条消防栓的维护记录"),
+) -> dict[str, Any]:
+    """维护记录：默认返回全部消防栓的动作历史；每条附带当前可执行动作。"""
+    items = service.list_maintenance(entry_id=entry_id)
+    return {"total": len(items), "items": items}
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出消防栓管理清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "hydrant", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条消防栓明细；不存在时给出可读的错误说明。"""
@@ -50,16 +67,15 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条消防栓执行试水检测、安排维修、登记拆除；不允许的动作会被拦下并说明原因。"""
+    """对单条消防栓执行试水检测、安排维修、登记拆除。
+
+    按钮可见性由服务端统一判定：被拦下的动作仍返回当前视图，
+    前端据此展示与列表一致的状态和可读原因。试水检测可在 values
+    里携带本次出水压力 ``pressure``。
+    """
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    pressure = payload.values.get("pressure")
+    entry, message, applied = service.run_action(entry_id, action, pressure=pressure)
     if entry is None:
         return ActionResult(ok=False, message=message)
-    return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出消防栓管理清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "hydrant", "total": total, "items": items}
+    return ActionResult(ok=applied, message=message, entry=entry)
