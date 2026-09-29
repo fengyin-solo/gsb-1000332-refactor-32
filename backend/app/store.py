@@ -28,8 +28,20 @@ class Store:
         return None
 
     def overview(self) -> dict[str, object]:
+        # 延迟导入：消防栓服务会反向使用 store 做唯一性校验，模块加载阶段不能形成循环。
+        from app.services.hydrant import HydrantService
+
         modules: list[dict[str, object]] = []
         for name in self.module_names():
+            if name == "hydrant":
+                hydrant_rows, _ = HydrantService().list_entries(page=1, size=10000)
+                modules.append({
+                    "name": name,
+                    "created": len(hydrant_rows),
+                    "pending": sum(1 for row in hydrant_rows if row.get("pending")),
+                    "abnormal": sum(1 for row in hydrant_rows if row.get("abnormal")),
+                })
+                continue
             rows = self.rows(name)
             modules.append({
                 "name": name,
